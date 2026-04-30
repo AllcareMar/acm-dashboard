@@ -1158,7 +1158,7 @@ const USERS = [
   {email:"wmartinez@allcaremar.com",  pass:"WM123",         name:"Waldo Martinez",    agency:null,               type:"admin"},
   {email:"mrodriguez@allcaremar.com", pass:"Allcare12345",  name:"Marcos Rodriguez",  agency:null,               type:"admin"},
   {email:"msanti@allcaremar.com",     pass:"Allcare12345",  name:"Maria Santiago",    agency:null,               type:"admin"},
-  {email:"abreja@allcaremar.com",     pass:"JC123",         name:"Jesus Cabreja",     agency:null,               type:"admin"},
+  {email:"jcabreja@allcaremar.com",     pass:"JC123",         name:"Jesus Cabreja",     agency:null,               type:"admin"},
   {email:"anamichelle@allcaremar.com",pass:"Amc12345",      name:"Ana Christopher",   agency:"AMC Care Group",   type:"director"},
   {email:"henryc@allcaremar.com",     pass:"Concep12345",   name:"Henry Concepcion",  agency:"Concep Care",      type:"director"},
   {email:"glendahealthagent@gmail.com",pass:"Gw12345",      name:"Glenda Colon",      agency:"GW Ins Group",     type:"director"},

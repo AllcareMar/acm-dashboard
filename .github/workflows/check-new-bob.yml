@@ -49,6 +49,7 @@ jobs:
           EMAIL_RECIPIENTS:        ${{ secrets.EMAIL_RECIPIENTS }}
           DASHBOARD_URL:           ${{ secrets.DASHBOARD_URL }}
         run: |
+          ls -R
           python scripts/setup_initial_data.py .
 
   # Deploy index.html to GitHub Pages whenever main branch changes

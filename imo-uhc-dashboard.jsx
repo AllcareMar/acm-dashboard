@@ -1155,66 +1155,44 @@ function CountyMap({selStates,mode,setMode}){
 
 // ── MAIN ─────────────────────────────────────────────────────────────────────
 const USERS = [
-  {email:"wmartinez@allcaremar.com",  pass:"WM123",         name:"Waldo Martinez",    agency:null,               type:"admin"},
-  {email:"mrodriguez@allcaremar.com", pass:"Allcare12345",  name:"Marcos Rodriguez",  agency:null,               type:"admin"},
-  {email:"msanti@allcaremar.com",     pass:"Allcare12345",  name:"Maria Santiago",    agency:null,               type:"admin"},
-  {email:"jcabreja@allcaremar.com",     pass:"JC123",         name:"Jesus Cabreja",     agency:null,               type:"admin"},
-  {email:"anamichelle@allcaremar.com",pass:"Amc12345",      name:"Ana Christopher",   agency:"AMC Care Group",   type:"director"},
-  {email:"henryc@allcaremar.com",     pass:"Concep12345",   name:"Henry Concepcion",  agency:"Concep Care",      type:"director"},
-  {email:"glendahealthagent@gmail.com",pass:"Gw12345",      name:"Glenda Colon",      agency:"GW Ins Group",     type:"director"},
-  {email:"julian_vega@allcaremar.com",pass:"Jpm12345",      name:"Julian Vega",       agency:"JPM Solutions",    type:"director"},
-  {email:"rpinzon@allcaremar.com",    pass:"Kmra12345",     name:"Roland Pinzon",     agency:"KMRA Group",       type:"director"},
-  {email:"amartell@allcaremar.com",   pass:"Martell12345",  name:"Ana Martell",       agency:"Martell Multi",    type:"director"},
-  {email:"nikols@allcaremar.com",     pass:"Simarova12345", name:"Nikol Simarova",    agency:"Simarova Senior",  type:"director"},
-  {email:"sclark@allcaremar.com",     pass:"Tcs12345",      name:"Sara Clark",        agency:"TCS & Associates", type:"director"},
-  {email:"pgalarza@allcaremar.com",   pass:"Top12345",      name:"Priscilla Galarza", agency:"Top Tier Health",  type:"director"},
+  {email:"wmartinez@allcaremar.com",  pass:"Waldo637#26",      name:"Waldo Martinez",    agency:null,               type:"admin"},
+  {email:"mrodriguez@allcaremar.com", pass:"Marcos772#26",     name:"Marcos Rodriguez",  agency:null,               type:"admin"},
+  {email:"msanti@allcaremar.com",     pass:"Maria123#26",      name:"Maria Santiago",    agency:null,               type:"admin"},
+  {email:"jcabreja@allcaremar.com",   pass:"Jesus388$26",      name:"Jesus Cabreja",     agency:null,               type:"admin"},
+  {email:"anamichelle@allcaremar.com",pass:"AMCcare669#26",    name:"Ana Christopher",   agency:"AMC Care Group",   type:"director"},
+  {email:"henryc@allcaremar.com",     pass:"Concep149$26",     name:"Henry Concepcion",  agency:"Concep Care",      type:"director"},
+  {email:"glendahealthagent@gmail.com",pass:"GWins983!26",     name:"Glenda Colon",      agency:"GW Ins Group",     type:"director"},
+  {email:"julian_vega@allcaremar.com",pass:"JPMsol248#26",     name:"Julian Vega",       agency:"JPM Solutions",    type:"director"},
+  {email:"rpinzon@allcaremar.com",    pass:"KMRAgrp161!26",    name:"Roland Pinzon",     agency:"KMRA Group",       type:"director"},
+  {email:"amartell@allcaremar.com",   pass:"Martell826#26",    name:"Ana Martell",       agency:"Martell Multi",    type:"director"},
+  {email:"nikols@allcaremar.com",     pass:"Simarova817#26",   name:"Nikol Simarova",    agency:"Simarova Senior",  type:"director"},
+  {email:"sclark@allcaremar.com",     pass:"TCSagy634$26",     name:"Sara Clark",        agency:"TCS & Associates", type:"director"},
+  {email:"pgalarza@allcaremar.com",   pass:"TopTier149%26",    name:"Priscilla Galarza", agency:"Top Tier Health",  type:"director"},
 ];
 
 export default function Dashboard(){
   const [authUser,       setAuthUser]       = useState(null);
-  const [needsPwdChange, setNeedsPwdChange] = useState(false);
   const [loginEmail,     setLoginEmail]     = useState("");
   const [loginPass,      setLoginPass]      = useState("");
   const [loginError,     setLoginError]     = useState("");
   const [forgotMode,     setForgotMode]     = useState(false);
   const [forgotEmail,    setForgotEmail]    = useState("");
   const [forgotMsg,      setForgotMsg]      = useState("");
-  const [newPwd,         setNewPwd]         = useState("");
-  const [confirmPwd,     setConfirmPwd]     = useState("");
-  const [pwdError,       setPwdError]       = useState("");
 
   const doForgot = () => {
     const u = USERS.find(x => x.email.toLowerCase() === forgotEmail.toLowerCase().trim());
     if (!u) { setForgotMsg("Email not found. Contact your administrator."); return; }
-    if (typeof localStorage !== "undefined") {
-      localStorage.removeItem("acm_pw_"+u.email);
-      localStorage.removeItem("acm_ch_"+u.email);
-    }
-    setForgotMsg("Password reset. Log in with your temporary password.");
+    setForgotMsg("Please contact wmartinez@allcaremar.com to reset your password.");
   };
   const doLogin = () => {
     const u = USERS.find(x => x.email.toLowerCase() === loginEmail.toLowerCase().trim());
     if (!u) { setLoginError("Invalid email or password."); return; }
-    const saved = typeof localStorage !== "undefined" ? localStorage.getItem("acm_pw_"+u.email) : null;
-    if ((saved||u.pass) !== loginPass) { setLoginError("Invalid email or password."); return; }
-    if (typeof localStorage !== "undefined") localStorage.setItem("acm_sess", JSON.stringify({email:u.email,name:u.name,agency:u.agency,type:u.type}));
+    if (u.pass !== loginPass) { setLoginError("Invalid email or password."); return; }
     setAuthUser(u);
     if (u.type==="director") setSelAgency(u.agency);
-    const changed = typeof localStorage !== "undefined" ? localStorage.getItem("acm_ch_"+u.email) : null;
-    if (!changed) setNeedsPwdChange(true);
-  };
-  const doSavePwd = () => {
-    if (newPwd.length < 8) { setPwdError("Min. 8 characters."); return; }
-    if (newPwd !== confirmPwd) { setPwdError("Passwords do not match."); return; }
-    if (typeof localStorage !== "undefined") {
-      localStorage.setItem("acm_pw_"+authUser.email, newPwd);
-      localStorage.setItem("acm_ch_"+authUser.email, "1");
-    }
-    setNeedsPwdChange(false);
   };
   const doLogout = () => {
-    if (typeof localStorage !== "undefined") localStorage.removeItem("acm_sess");
-    setAuthUser(null); setNeedsPwdChange(false); setSelAgency(null); setSel([]);
+    setAuthUser(null); setSelAgency(null); setSel([]);
     setLoginEmail(""); setLoginPass(""); setLoginError("");
   };
   const allAgencies = AGENCIES;
@@ -1502,29 +1480,6 @@ export default function Dashboard(){
   );
 
 
-  if (needsPwdChange) return (
-    <div style={{minHeight:"100vh",background:"linear-gradient(135deg,#020817,#0a1628)",display:"flex",alignItems:"center",justifyContent:"center"}}>
-      <div style={{background:"#0f172a",border:"1px solid #f5a80055",borderRadius:16,padding:"40px 44px",width:"100%",maxWidth:420}}>
-        <div style={{textAlign:"center",marginBottom:20}}>
-          <img src={LOGO} alt="AllCare Mar" style={{height:44,background:"#fff",borderRadius:8,padding:"4px 12px",objectFit:"contain"}}/>
-          <h2 style={{margin:"14px 0 4px",color:"#f1f5f9",fontSize:18,fontWeight:700}}>Create Your Password</h2>
-          <p style={{margin:0,color:"#475569",fontSize:13}}>Hi {authUser&&authUser.name.split(" ")[0]}! Set a personal password.</p>
-        </div>
-        <div style={{marginBottom:12}}>
-          <div style={{color:"#94a3b8",fontSize:11,textTransform:"uppercase",marginBottom:5}}>New Password</div>
-          <input type="password" value={newPwd} onChange={e=>setNewPwd(e.target.value)} placeholder="Min. 8 characters" style={{width:"100%",background:"#020817",border:"1px solid #1e293b",borderRadius:7,padding:"10px 13px",color:"#f1f5f9",fontSize:14,outline:"none",boxSizing:"border-box"}}/>
-        </div>
-        <div style={{marginBottom:16}}>
-          <div style={{color:"#94a3b8",fontSize:11,textTransform:"uppercase",marginBottom:5}}>Confirm Password</div>
-          <input type="password" value={confirmPwd} onChange={e=>setConfirmPwd(e.target.value)} onKeyDown={e=>e.key==="Enter"&&doSavePwd()} placeholder="Repeat password" style={{width:"100%",background:"#020817",border:"1px solid #1e293b",borderRadius:7,padding:"10px 13px",color:"#f1f5f9",fontSize:14,outline:"none",boxSizing:"border-box"}}/>
-        </div>
-        {pwdError&&<div style={{background:"#450a0a",borderRadius:7,padding:"9px 13px",color:"#fca5a5",fontSize:13,marginBottom:14}}>{pwdError}</div>}
-        <button onClick={doSavePwd} style={{width:"100%",background:UHC_GOLD,border:"none",borderRadius:7,padding:"12px",color:UHC_BLUE,fontSize:15,fontWeight:700,cursor:"pointer"}}>Save Password</button>
-      </div>
-    </div>
-  );
-
-
   const user = authUser;
 
   return(
@@ -1533,11 +1488,10 @@ export default function Dashboard(){
       <style>{".recharts-legend-item-text{color:#f1f5f9!important} .recharts-legend-item text{fill:#f1f5f9!important}"}</style>
 
       {/* HEADER */}
-      <div style={{background:"linear-gradient(135deg,"+UHC_BLUE+",#001a5e)",padding:"14px 24px",borderBottom:"2px solid "+UHC_GOLD}}>
+      <div style={{background:"linear-gradient(135deg,"+UHC_BLUE+",#001a5e)",padding:"14px 24px 14px 14px",borderBottom:"2px solid "+UHC_GOLD}}>
         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:12}}>
-          <div style={{display:"flex",alignItems:"center",gap:14}}>
-            <img src={LOGO} alt="AllCare Mar" style={{height:52,width:"auto",objectFit:"contain",background:"#ffffff",borderRadius:8,padding:"4px 10px"}}/>
-            <div style={{width:1,height:40,background:"#ffffff20"}}/>
+          <div style={{display:"flex",alignItems:"center",gap:18}}>
+            <img src={LOGO} alt="AllCare Mar" style={{height:60,width:"auto",objectFit:"contain",background:"#ffffff",borderRadius:8,padding:"4px 10px"}}/>
             <div>
               <div style={{display:"flex",alignItems:"center",gap:8}}>
                 <div style={{background:UHC_GOLD,borderRadius:6,padding:"3px 10px",fontFamily:"'Space Grotesk',sans-serif",fontWeight:700,color:UHC_BLUE,fontSize:12}}>UHC  ·  IMO Partner</div>

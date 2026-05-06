@@ -2,11 +2,9 @@ name: ACM BOB Auto-Refresh
 
 on:
   schedule:
-    # Every 10 minutes (GitHub Actions has ~5-15 min real latency)
     - cron: '*/10 * * * *'
-  workflow_dispatch:  # Allow manual trigger from Actions tab
+  workflow_dispatch:
 
-# Only one run at a time - prevent concurrent processing
 concurrency:
   group: bob-refresh
   cancel-in-progress: false
@@ -17,16 +15,16 @@ jobs:
     timeout-minutes: 15
 
     permissions:
-      contents: write  # needed to push updated index.html, JSX and state.json
-      pages: write     # needed for GitHub Pages deployment
-      id-token: write  # needed for GitHub Pages OIDC
+      contents: write
+      pages: write
+      id-token: write
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          fetch-depth: 0  # full history for git operations
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -37,9 +35,9 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install pandas openpyxl google-api-python-client google-auth-httplib2 google-auth-oauthlib
 
-      - name: Run BOB refresh check
+      - name: INITIAL BOOTSTRAP (Download and Create Master)
         env:
           GDRIVE_CREDENTIALS_JSON: ${{ secrets.GDRIVE_CREDENTIALS_JSON }}
           GDRIVE_NEW_FOLDER_ID:    ${{ secrets.GDRIVE_NEW_FOLDER_ID }}
@@ -49,9 +47,20 @@ jobs:
           EMAIL_RECIPIENTS:        ${{ secrets.EMAIL_RECIPIENTS }}
           DASHBOARD_URL:           ${{ secrets.DASHBOARD_URL }}
         run: |
-          python scripts/check_and_process.py
+          # Intentamos procesar (esto bajará el Excel de Drive aunque de error al final)
+          python scripts/check_and_process.py || true
+          # Listamos para confirmar que el Excel está aquí
+          ls -R
+          # Creamos el archivo maestro usando los archivos descargados
+          python scripts/setup_initial_data.py .
 
-  # Deploy index.html to GitHub Pages whenever main branch changes
+      - name: Commit and push snapshots
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add data/snapshots_master.pkl
+          git diff --quiet && git diff --staged --quiet || (git commit -m "Bootstrap: Create master snapshots file" && git push)
+
   deploy-pages:
     needs: check-and-process
     runs-on: ubuntu-latest
@@ -61,22 +70,16 @@ jobs:
       id-token: write
     environment:
       name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-
     steps:
       - name: Checkout latest
         uses: actions/checkout@v4
         with:
           ref: main
-
       - name: Setup Pages
         uses: actions/configure-pages@v4
-
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
           path: '.'
-
       - name: Deploy to GitHub Pages
-        id: deployment
         uses: actions/deploy-pages@v4

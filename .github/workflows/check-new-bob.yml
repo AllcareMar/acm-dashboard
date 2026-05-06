@@ -56,7 +56,7 @@ jobs:
           # 3. Creamos el archivo maestro y forzamos su ubicación en ./data/
           if [ -n "$TEMP_DIR" ]; then
             python scripts/setup_initial_data.py "$TEMP_DIR"
-            # Movemos el archivo generado a la carpeta data por si el script lo dejó en otro lado
+            # Nos aseguramos de que el archivo termine en /data
             find . -name "snapshots_master.pkl" -exec mv {} ./data/ \;
           else
             echo "Error: No se descargó el archivo de Drive."
@@ -68,11 +68,13 @@ jobs:
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
           
-          # Verificamos si el archivo existe antes de subirlo
+          # Verificamos que el archivo existe en la carpeta data
           ls -l data/
           
-          git add data/snapshots_master.pkl
-          git commit -m "Bootstrap: Hard-fix master snapshots file" || echo "No changes to commit"
+          # FORZAMOS el add ignorando el .gitignore con el parámetro -f
+          git add -f data/snapshots_master.pkl
+          
+          git commit -m "Bootstrap: Hard-fix master snapshots file (ignoring gitignore)" || echo "No changes to commit"
           git push origin main
 
   deploy-pages:

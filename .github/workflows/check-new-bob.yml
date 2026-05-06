@@ -47,18 +47,29 @@ jobs:
           EMAIL_RECIPIENTS:        ${{ secrets.EMAIL_RECIPIENTS }}
           DASHBOARD_URL:           ${{ secrets.DASHBOARD_URL }}
         run: |
-          # Intentamos procesar (esto bajará el Excel de Drive aunque de error al final)
+          # 1. Ejecutamos el proceso para descargar el archivo de Drive a la carpeta /tmp
           python scripts/check_and_process.py || true
-          # Listamos para confirmar que el Excel está aquí
-          ls -R
-          # Creamos el archivo maestro usando los archivos descargados
-          python scripts/setup_initial_data.py .
+          
+          # 2. Localizamos la carpeta temporal donde quedó el Excel (ej. /tmp/acm_bob_xxxx)
+          TEMP_DIR=$(find /tmp -name "acm_bob_*" -type d | head -n 1)
+          echo "Carpeta temporal detectada: $TEMP_DIR"
+          
+          # 3. Verificamos si hay archivos Excel en esa carpeta
+          ls -R "$TEMP_DIR"
+          
+          # 4. Forzamos el setup inicial apuntando a esa carpeta
+          if [ -n "$TEMP_DIR" ]; then
+            python scripts/setup_initial_data.py "$TEMP_DIR"
+          else
+            echo "Error: No se encontró la carpeta temporal de descarga."
+            exit 1
+          fi
 
       - name: Commit and push snapshots
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
-          git add data/snapshots_master.pkl
+          git add data/
           git diff --quiet && git diff --staged --quiet || (git commit -m "Bootstrap: Create master snapshots file" && git push)
 
   deploy-pages:

@@ -119,26 +119,73 @@ def read_bob_file(filepath, snapshot_date):
 
 
 def load_master_snapshots():
-    """Load the master historical snapshots pickle (gzip compressed)."""
+    """Load the master historical snapshots (universal format compatible with any pandas version)."""
     master_path = DATA_DIR / 'snapshots_master.pkl'
     if not master_path.exists():
         raise FileNotFoundError(
             f'Master snapshots file not found at {master_path}. '
             f'Run setup_initial_data.py first to bootstrap historical data.'
         )
-    return pd.read_pickle(master_path, compression='gzip')
+
+    # Try universal format first (dict of lists), fallback to pandas pickle
+    import gzip
+    try:
+        with gzip.open(master_path, 'rb') as f:
+            data = pickle.load(f)
+
+        # Check if it's the universal format (dict with __format_version__)
+        if isinstance(data, dict) and '__format_version__' in data:
+            # Reconstruct DataFrame from universal format
+            date_cols = data.get('__date_columns__', [])
+            df_data = {k: v for k, v in data.items() if not k.startswith('__')}
+            df = pd.DataFrame(df_data)
+
+            # Convert date columns back to datetime
+            for col in date_cols:
+                if col in df.columns:
+                    df[col] = pd.to_datetime(df[col], errors='coerce')
+
+            # Replace empty strings with NaN where appropriate
+            for col in df.columns:
+                if col not in date_cols and df[col].dtype == 'object':
+                    df.loc[df[col] == '', col] = pd.NA
+
+            return df
+        else:
+            # Old format - direct DataFrame pickle
+            return data
+    except Exception:
+        # Fallback to pandas read_pickle for backward compatibility
+        return pd.read_pickle(master_path, compression='gzip')
 
 
 def save_master_snapshots(df):
-    """Save master pickle with gzip compression (reduces size ~9x)."""
-    # Convert repetitive string columns to category for size reduction
-    cat_cols = ['product', 'memberState', 'memberCounty', 'agentName', 'planStatus',
-                'termReasonCode', 'planName', 'gaName30', 'mgaName40', 'fmoName50',
-                'snapshot_file', 'agency_raw', 'agency_short']
-    for col in cat_cols:
-        if col in df.columns and df[col].dtype != 'category':
-            df[col] = df[col].astype('category')
-    df.to_pickle(DATA_DIR / 'snapshots_master.pkl', compression='gzip')
+    """Save master pickle in universal format (compatible with any pandas version)."""
+    import gzip
+
+    # Convert all data to universal types (str + ISO date strings)
+    data_dict = {}
+    date_columns = []
+
+    for col in df.columns:
+        if 'datetime' in str(df[col].dtype):
+            date_columns.append(col)
+            # Convert datetime to ISO string format (universal)
+            data_dict[col] = df[col].dt.strftime('%Y-%m-%d').fillna('').tolist()
+        else:
+            # Convert everything else to string (universal)
+            data_dict[col] = df[col].astype(str).fillna('').tolist()
+
+    # Add metadata
+    data_dict['__columns__'] = list(df.columns)
+    data_dict['__date_columns__'] = date_columns
+    data_dict['__shape__'] = df.shape
+    data_dict['__format_version__'] = '2.0_universal'
+
+    # Save with protocol 4 (compatible with Python 3.4+) and gzip
+    output_path = DATA_DIR / 'snapshots_master.pkl'
+    with gzip.open(output_path, 'wb') as f:
+        pickle.dump(data_dict, f, protocol=4)
 
 
 def calculate_retention_data(df):

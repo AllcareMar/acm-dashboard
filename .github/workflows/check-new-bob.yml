@@ -43,7 +43,7 @@ jobs:
         env:
           GDRIVE_CREDENTIALS_JSON: ${{ secrets.GDRIVE_CREDENTIALS_JSON }}
           GDRIVE_NEW_FOLDER_ID:    ${{ secrets.GDRIVE_NEW_FOLDER_ID }}
-          GDRIVE_ARCHIVE_FOLDER_ID:${{ secrets.GDRIVE_ARCHIVE_FOLDER_ID }}
+          GDRIVE_ARCHIVE_FOLDER_ID: ${{ secrets.GDRIVE_ARCHIVE_FOLDER_ID }}
           GMAIL_SENDER:            ${{ secrets.GMAIL_SENDER }}
           GMAIL_APP_PASSWORD:      ${{ secrets.GMAIL_APP_PASSWORD }}
           EMAIL_RECIPIENTS:        ${{ secrets.EMAIL_RECIPIENTS }}

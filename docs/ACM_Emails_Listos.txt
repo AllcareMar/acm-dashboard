@@ -186,7 +186,7 @@ AllCare Mar Agency LLC
 EMAIL #4 - JESUS CABREJA (ADMIN)
 ================================================================================
 
-Para:    abreja@allcaremar.com
+Para:    jcabreja@allcaremar.com
 Asunto:  ACM Dashboard - Acceso de Administrador
 
 Cuerpo:
@@ -201,7 +201,7 @@ agencia y estado.
 
 Tus credenciales (perfil ADMIN - ves todas las agencias):
 
-   Email:    abreja@allcaremar.com
+   Email:    jcabreja@allcaremar.com
    Password: JC123
 
 ⚠️ El sistema te pedirá cambiar la password en tu primer login. 

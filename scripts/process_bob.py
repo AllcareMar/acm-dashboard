@@ -119,73 +119,26 @@ def read_bob_file(filepath, snapshot_date):
 
 
 def load_master_snapshots():
-    """Load the master historical snapshots (universal format compatible with any pandas version)."""
+    """Load the master historical snapshots pickle (gzip compressed)."""
     master_path = DATA_DIR / 'snapshots_master.pkl'
     if not master_path.exists():
         raise FileNotFoundError(
             f'Master snapshots file not found at {master_path}. '
             f'Run setup_initial_data.py first to bootstrap historical data.'
         )
-
-    # Try universal format first (dict of lists), fallback to pandas pickle
-    import gzip
-    try:
-        with gzip.open(master_path, 'rb') as f:
-            data = pickle.load(f)
-
-        # Check if it's the universal format (dict with __format_version__)
-        if isinstance(data, dict) and '__format_version__' in data:
-            # Reconstruct DataFrame from universal format
-            date_cols = data.get('__date_columns__', [])
-            df_data = {k: v for k, v in data.items() if not k.startswith('__')}
-            df = pd.DataFrame(df_data)
-
-            # Convert date columns back to datetime
-            for col in date_cols:
-                if col in df.columns:
-                    df[col] = pd.to_datetime(df[col], errors='coerce')
-
-            # Replace empty strings with NaN where appropriate
-            for col in df.columns:
-                if col not in date_cols and df[col].dtype == 'object':
-                    df.loc[df[col] == '', col] = pd.NA
-
-            return df
-        else:
-            # Old format - direct DataFrame pickle
-            return data
-    except Exception:
-        # Fallback to pandas read_pickle for backward compatibility
-        return pd.read_pickle(master_path, compression='gzip')
+    return pd.read_pickle(master_path, compression='gzip')
 
 
 def save_master_snapshots(df):
-    """Save master pickle in universal format (compatible with any pandas version)."""
-    import gzip
-
-    # Convert all data to universal types (str + ISO date strings)
-    data_dict = {}
-    date_columns = []
-
-    for col in df.columns:
-        if 'datetime' in str(df[col].dtype):
-            date_columns.append(col)
-            # Convert datetime to ISO string format (universal)
-            data_dict[col] = df[col].dt.strftime('%Y-%m-%d').fillna('').tolist()
-        else:
-            # Convert everything else to string (universal)
-            data_dict[col] = df[col].astype(str).fillna('').tolist()
-
-    # Add metadata
-    data_dict['__columns__'] = list(df.columns)
-    data_dict['__date_columns__'] = date_columns
-    data_dict['__shape__'] = df.shape
-    data_dict['__format_version__'] = '2.0_universal'
-
-    # Save with protocol 4 (compatible with Python 3.4+) and gzip
-    output_path = DATA_DIR / 'snapshots_master.pkl'
-    with gzip.open(output_path, 'wb') as f:
-        pickle.dump(data_dict, f, protocol=4)
+    """Save master pickle with gzip compression (reduces size ~9x)."""
+    # Convert repetitive string columns to category for size reduction
+    cat_cols = ['product', 'memberState', 'memberCounty', 'agentName', 'planStatus',
+                'termReasonCode', 'planName', 'gaName30', 'mgaName40', 'fmoName50',
+                'snapshot_file', 'agency_raw', 'agency_short']
+    for col in cat_cols:
+        if col in df.columns and df[col].dtype != 'category':
+            df[col] = df[col].astype('category')
+    df.to_pickle(DATA_DIR / 'snapshots_master.pkl', compression='gzip')
 
 
 def calculate_retention_data(df):
@@ -303,17 +256,233 @@ def calculate_retention_data(df):
     }
 
 
-def inject_retention_data_to_jsx(retention_data):
-    """Replace the RETENTION_DATA constant in the JSX file with new data."""
+def compute_bob_and_agency_updates(df, latest_snap):
+    """
+    Compute the new `const BOB={...}` string and per-agency updates
+    (total, uniqueAgents, states, bobState) from the latest snapshot.
+
+    Returns:
+      {
+        'bob_line': "const BOB={AL:{m:N,a:N}, ...};",
+        'agency_updates': {
+          'AllCare Mar': {
+            'total': N, 'uniqueAgents': N, 'states': [...], 'bobState': {...}
+          },
+          ...
+        },
+        'total_policies': int  # sum of all MA policies in the latest snapshot
+      }
+    """
+    latest = df[df['snapshot_date'] == latest_snap].drop_duplicates(subset=['policy_id']).copy()
+    # Filter to MA only to match existing AGENCY_DATA convention
+    latest = latest[latest['product'] == 'MA'].copy()
+
+    # Ensure memberState is filled - try inferring from planName if missing
+    def infer_state(row):
+        ms = row.get('memberState', '')
+        if pd.notna(ms) and str(ms).strip() and str(ms).strip().lower() not in ['nan', 'none', 'unknown']:
+            return str(ms).strip()
+        pn = str(row.get('planName', ''))
+        m = re.search(r'\b([A-Z]{2})-', pn)
+        return m.group(1) if m else 'Unknown'
+    latest['memberState'] = latest.apply(infer_state, axis=1)
+
+    # Build BOB global by state
+    bob_state = {}
+    for state, sub in latest.groupby('memberState'):
+        if state == 'Unknown' or len(str(state)) != 2:
+            continue
+        bob_state[state] = {
+            'm': len(sub),
+            'a': sub['agentName'].nunique(),
+        }
+    bob_parts = [f"{s}:{{m:{bob_state[s]['m']},a:{bob_state[s]['a']}}}" for s in sorted(bob_state.keys())]
+    bob_line = "const BOB={" + ", ".join(bob_parts) + "};"
+
+    # Build per-agency updates
+    agency_updates = {}
+    for agency, sub in latest.groupby('agency_short'):
+        states_data = {}
+        for state, sub2 in sub.groupby('memberState'):
+            if state == 'Unknown' or len(str(state)) != 2:
+                continue
+            states_data[state] = {'m': len(sub2), 'a': sub2['agentName'].nunique()}
+        agency_updates[agency] = {
+            'total': len(sub),
+            'uniqueAgents': sub['agentName'].nunique(),
+            'states': sorted(states_data.keys()),
+            'bobState': states_data,
+        }
+
+    return {
+        'bob_line': bob_line,
+        'agency_updates': agency_updates,
+        'total_policies': len(latest),
+    }
+
+
+def inject_bob_const_to_jsx(content, bob_line):
+    """Replace the `const BOB={...};` line in the JSX with the new BOB."""
+    lines = content.split('\n')
+    for i, line in enumerate(lines):
+        if line.startswith('const BOB={'):
+            lines[i] = bob_line
+            return '\n'.join(lines), True
+    return content, False
+
+
+def inject_agency_data_to_jsx(content, agency_updates):
+    """
+    Update each agency block in AGENCY_DATA with new total, uniqueAgents,
+    states, and bobState. Uses safe block-level patching with brace counting
+    to ensure we never break syntax.
+    """
+    import json as _json
+    success_count = 0
+
+    for ag_name, info in agency_updates.items():
+        new_total = info['total']
+        new_unique = info['uniqueAgents']
+        new_states = info['states']
+        new_bobstate = info['bobState']
+
+        anchor = f'"{ag_name}": {{'
+        start = content.find(anchor)
+        if start == -1:
+            continue
+
+        # Update total + uniqueAgents (single line)
+        total_pat = re.compile(r'total:\d+, uniqueAgents:\d+,')
+        m = total_pat.search(content, start)
+        if not m or m.start() > start + 200:
+            continue
+        new_total_line = f'total:{new_total}, uniqueAgents:{new_unique},'
+        content = content[:m.start()] + new_total_line + content[m.end():]
+
+        # Update states:[...]
+        states_pat = re.compile(r'states:\[[^\]]*\],')
+        m = states_pat.search(content, start)
+        if not m or m.start() > start + 400:
+            continue
+        states_str = _json.dumps(new_states)
+        new_states_line = f'states:{states_str},'
+        content = content[:m.start()] + new_states_line + content[m.end():]
+
+        # Update bobState:{...}, - use brace counting because inner objects have braces
+        bob_idx = content.find('bobState:{', start)
+        if bob_idx == -1 or bob_idx > start + 800:
+            continue
+        # Find matching close brace
+        depth = 0
+        i = bob_idx + len('bobState:')
+        end_idx = -1
+        while i < len(content):
+            if content[i] == '{':
+                depth += 1
+            elif content[i] == '}':
+                depth -= 1
+                if depth == 0:
+                    end_idx = i + 1
+                    break
+            i += 1
+        if end_idx == -1:
+            continue
+        # Include trailing comma if present
+        if end_idx < len(content) and content[end_idx] == ',':
+            end_idx += 1
+
+        bobstate_parts = [f"{s}:{{m:{new_bobstate[s]['m']},a:{new_bobstate[s]['a']}}}" for s in sorted(new_bobstate.keys())]
+        new_bobstate_str = "bobState:{" + ", ".join(bobstate_parts) + "},"
+        content = content[:bob_idx] + new_bobstate_str + content[end_idx:]
+
+        success_count += 1
+
+    return content, success_count
+
+
+def inject_hardcoded_texts_to_jsx(content, snapshot_date, total_policies):
+    """
+    Replace any hardcoded date/total references in the JSX with the new
+    snapshot's date and total. This handles the 6 known display strings:
+      - BobBadge banner (banner morado)
+      - AgencyFilter dropdown count
+      - Heatmap source label
+      - Header "BOB as of"
+      - Zip ranking source filename
+      - Footer source filename
+
+    Strategy: use regex patterns that match any prior date format
+    (MM-DD-YYYY, MM-DD-YY) and any prior total formatted with commas,
+    then substitute the new ones.
+    """
+    ts = pd.Timestamp(snapshot_date)
+    date_display = ts.strftime('%m-%d-%Y')  # e.g. "05-12-2026"
+    date_file = ts.strftime('%m-%d-%y')      # e.g. "05-12-26"
+    total_fmt = f'{total_policies:,}'        # e.g. "21,587"
+
+    replacements_made = 0
+
+    # 1) BobBadge banner: "BOB REAL</strong>  ·  21,456 policies  ·  776 counties  ·  4,275 zips  ·  05-05-2026"
+    pat = re.compile(r'(BOB REAL</strong>\s*&middot;\s*|BOB REAL</strong>  &#183;  |BOB REAL</strong>  \xc2\xb7  |BOB REAL</strong>\s*\xb7\s*)(\d{1,3}(?:,\d{3})*)( policies\s*[\xb7\xb7]?\s*\d{3} counties\s*[\xb7\xb7]?\s*[\d,]+ zips\s*[\xb7\xb7]?\s*)(\d{2}-\d{2}-\d{4})')
+    # Simpler: just look for "NN,NNN policies  ·  776 counties  ·  4,275 zips  ·  MM-DD-YYYY"
+    pat_banner = re.compile(r'(\d{1,3}(?:,\d{3})+) policies(\s*[\xb7\u00b7]?\s*776 counties\s*[\xb7\u00b7]?\s*4,275 zips\s*[\xb7\u00b7]?\s*)(\d{2}-\d{2}-\d{4})')
+    new_content, n = pat_banner.subn(lambda mm: f'{total_fmt} policies{mm.group(2)}{date_display}', content)
+    content = new_content
+    replacements_made += n
+
+    # 2) AgencyFilter dropdown: <span ...>21,456 policies</span>
+    pat_dropdown = re.compile(r'(fontSize:11\}\}>)(\d{1,3}(?:,\d{3})+)( policies</span>)')
+    new_content, n = pat_dropdown.subn(lambda mm: f'{mm.group(1)}{total_fmt}{mm.group(3)}', content)
+    content = new_content
+    replacements_made += n
+
+    # 3) Heatmap source: "Source: ACM BOB 05-05-2026"
+    pat_heatmap = re.compile(r'(Source: ACM BOB )(\d{2}-\d{2}-\d{4})')
+    new_content, n = pat_heatmap.subn(lambda mm: f'{mm.group(1)}{date_display}', content)
+    content = new_content
+    replacements_made += n
+
+    # 4) Header "BOB as of MM-DD-YYYY"
+    pat_header = re.compile(r'(BOB as of )(\d{2}-\d{2}-\d{4})')
+    new_content, n = pat_header.subn(lambda mm: f'{mm.group(1)}{date_display}', content)
+    content = new_content
+    replacements_made += n
+
+    # 5) Zip ranking source filename: ACM_BOB_MM-DD-YYYY.xlsx
+    pat_zip = re.compile(r'ACM_BOB_\d{2}-\d{2}-\d{4}\.xlsx')
+    new_content, n = pat_zip.subn(f'ACM_BOB_{date_display}.xlsx', content)
+    content = new_content
+    replacements_made += n
+
+    # 6) Footer "BOB: ACM_BOB_MM-DD-YY.xlsx  ·  N,NNN active policies"
+    pat_footer = re.compile(r'(BOB: ACM_BOB_)(\d{2}-\d{2}-\d{2})(\.xlsx\s*[\xb7\u00b7]?\s*)(\d{1,3}(?:,\d{3})+)( active policies)')
+    new_content, n = pat_footer.subn(lambda mm: f'{mm.group(1)}{date_file}{mm.group(3)}{total_fmt}{mm.group(5)}', content)
+    content = new_content
+    replacements_made += n
+
+    return content, replacements_made
+
+
+def inject_retention_data_to_jsx(retention_data, df=None, latest_snap=None):
+    """
+    Replace the RETENTION_DATA constant in the JSX file with new data.
+
+    If `df` (the full combined dataframe) and `latest_snap` are also provided,
+    this also updates:
+      - const BOB={...}                           (KPI Active BOB Members)
+      - AGENCY_DATA per-agency total/states/bobState
+      - Hardcoded display strings (header date, banner totals, etc.)
+
+    This makes the dashboard fully self-updating each week.
+    """
     if not DASHBOARD_JSX.exists():
         raise FileNotFoundError(f'Dashboard JSX not found at {DASHBOARD_JSX}')
 
     with open(DASHBOARD_JSX) as f:
         content = f.read()
 
+    # === Step 1: Replace RETENTION_DATA ===
     raw_json = json.dumps(retention_data, separators=(',', ':'))
-
-    # Verify ASCII-safe (Babel parser requirement)
     try:
         raw_json.encode('ascii')
     except UnicodeEncodeError as e:
@@ -327,18 +496,60 @@ def inject_retention_data_to_jsx(retention_data):
     if not match:
         raise RuntimeError('RETENTION_DATA constant not found in dashboard JSX')
 
-    new_content = content[:match.start()] + new_const + content[match.end():]
+    content = content[:match.start()] + new_const + content[match.end():]
 
-    with open(DASHBOARD_JSX) as f:
-        pass  # already opened above
+    # === Step 2: Update BOB + AGENCY_DATA + hardcoded texts (if data provided) ===
+    if df is not None and latest_snap is not None:
+        try:
+            print('  - Computing BOB + AGENCY_DATA from latest snapshot...')
+            updates = compute_bob_and_agency_updates(df, latest_snap)
+            print(f'    Latest snapshot total (MA only): {updates["total_policies"]:,}')
+
+            # Update BOB const
+            content_before = content
+            content, bob_replaced = inject_bob_const_to_jsx(content, updates['bob_line'])
+            if bob_replaced:
+                print('  - BOB const updated')
+            else:
+                print('  ⚠️  BOB const not found, kept original')
+                content = content_before
+
+            # Verify braces still balanced after BOB update
+            brace_balance = content.count('{') - content.count('}')
+            if brace_balance != 0:
+                print(f'  ⚠️  BOB update broke braces (balance={brace_balance}), reverting BOB')
+                content = content_before
+
+            # Update each agency block (with brace safety)
+            content_before_agency = content
+            content, agencies_updated = inject_agency_data_to_jsx(content, updates['agency_updates'])
+            print(f'  - {agencies_updated}/{len(updates["agency_updates"])} agencies updated')
+
+            # Verify braces still balanced after AGENCY_DATA updates
+            brace_balance = content.count('{') - content.count('}')
+            if brace_balance != 0:
+                print(f'  ⚠️  AGENCY_DATA updates broke braces (balance={brace_balance}), reverting')
+                content = content_before_agency
+
+            # Update hardcoded display texts
+            content, texts_replaced = inject_hardcoded_texts_to_jsx(content, latest_snap, updates['total_policies'])
+            print(f'  - {texts_replaced} hardcoded display strings updated')
+        except Exception as e:
+            print(f'  ⚠️  Extended JSX updates failed: {e}')
+            print('  Continuing with RETENTION_DATA-only update')
+
+    # === Step 3: Final brace validation before writing ===
+    final_balance = content.count('{') - content.count('}')
+    if final_balance != 0:
+        raise RuntimeError(f'Aborting JSX write: brace balance is {final_balance}, would break dashboard')
 
     with open(DASHBOARD_JSX, 'w') as f:
-        f.write(new_content)
+        f.write(content)
 
     # ALSO regenerate the standalone HTML for GitHub Pages
-    regenerate_index_html(new_content)
+    regenerate_index_html(content)
 
-    return len(new_content)
+    return len(content)
 
 
 def regenerate_index_html(jsx_code):
@@ -403,12 +614,12 @@ def process_new_bob(filepath, snapshot_date):
 
     # Inject into JSX
     print('Injecting into dashboard JSX...')
-    jsx_size = inject_retention_data_to_jsx(retention_data)
+    snapshots_sorted = sorted(combined['snapshot_date'].unique())
+    latest_snap = snapshots_sorted[-1]
+    jsx_size = inject_retention_data_to_jsx(retention_data, df=combined, latest_snap=latest_snap)
     print(f'  - JSX now: {jsx_size:,} chars')
 
     # Build summary
-    snapshots_sorted = sorted(combined['snapshot_date'].unique())
-    latest_snap = snapshots_sorted[-1]
     prev_snap = snapshots_sorted[-2] if len(snapshots_sorted) > 1 else None
 
     latest_df = combined[combined['snapshot_date'] == latest_snap].drop_duplicates(subset=['policy_id'])

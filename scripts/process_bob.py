@@ -498,44 +498,77 @@ def inject_retention_data_to_jsx(retention_data, df=None, latest_snap=None):
 
     content = content[:match.start()] + new_const + content[match.end():]
 
+    # Track warnings to surface them in the email notification
+    warnings_list = []
+    update_stats = {
+        'retention_data_updated': True,
+        'bob_const_updated': False,
+        'agencies_updated': 0,
+        'agencies_total': 0,
+        'hardcoded_texts_updated': 0,
+        'expected_hardcoded_texts': 6,
+    }
+
     # === Step 2: Update BOB + AGENCY_DATA + hardcoded texts (if data provided) ===
     if df is not None and latest_snap is not None:
         try:
             print('  - Computing BOB + AGENCY_DATA from latest snapshot...')
             updates = compute_bob_and_agency_updates(df, latest_snap)
             print(f'    Latest snapshot total (MA only): {updates["total_policies"]:,}')
+            update_stats['agencies_total'] = len(updates['agency_updates'])
 
             # Update BOB const
             content_before = content
             content, bob_replaced = inject_bob_const_to_jsx(content, updates['bob_line'])
             if bob_replaced:
                 print('  - BOB const updated')
+                update_stats['bob_const_updated'] = True
             else:
-                print('  ⚠️  BOB const not found, kept original')
+                msg = 'BOB const not found in JSX (regex did not match "const BOB={" pattern)'
+                print(f'  ⚠️  {msg}')
+                warnings_list.append(msg)
                 content = content_before
 
             # Verify braces still balanced after BOB update
             brace_balance = content.count('{') - content.count('}')
             if brace_balance != 0:
-                print(f'  ⚠️  BOB update broke braces (balance={brace_balance}), reverting BOB')
+                msg = f'BOB update broke brace balance (delta={brace_balance}), reverted'
+                print(f'  ⚠️  {msg}')
+                warnings_list.append(msg)
                 content = content_before
+                update_stats['bob_const_updated'] = False
 
             # Update each agency block (with brace safety)
             content_before_agency = content
             content, agencies_updated = inject_agency_data_to_jsx(content, updates['agency_updates'])
+            update_stats['agencies_updated'] = agencies_updated
             print(f'  - {agencies_updated}/{len(updates["agency_updates"])} agencies updated')
+            if agencies_updated < len(updates['agency_updates']):
+                missing = len(updates['agency_updates']) - agencies_updated
+                msg = f'{missing} of {len(updates["agency_updates"])} agencies could not be updated (anchor "name": {{ not found, or pattern mismatch)'
+                warnings_list.append(msg)
 
             # Verify braces still balanced after AGENCY_DATA updates
             brace_balance = content.count('{') - content.count('}')
             if brace_balance != 0:
-                print(f'  ⚠️  AGENCY_DATA updates broke braces (balance={brace_balance}), reverting')
+                msg = f'AGENCY_DATA updates broke brace balance (delta={brace_balance}), reverted ALL agency changes'
+                print(f'  ⚠️  {msg}')
+                warnings_list.append(msg)
                 content = content_before_agency
+                update_stats['agencies_updated'] = 0
 
             # Update hardcoded display texts
             content, texts_replaced = inject_hardcoded_texts_to_jsx(content, latest_snap, updates['total_policies'])
+            update_stats['hardcoded_texts_updated'] = texts_replaced
             print(f'  - {texts_replaced} hardcoded display strings updated')
+            if texts_replaced < 6:
+                missing = 6 - texts_replaced
+                msg = f'{missing} of 6 hardcoded display strings could not be updated (regex did not match). Dashboard may show old date/total values.'
+                warnings_list.append(msg)
         except Exception as e:
-            print(f'  ⚠️  Extended JSX updates failed: {e}')
+            msg = f'Extended JSX updates failed with exception: {type(e).__name__}: {e}'
+            print(f'  ⚠️  {msg}')
+            warnings_list.append(msg)
             print('  Continuing with RETENTION_DATA-only update')
 
     # === Step 3: Final brace validation before writing ===
@@ -549,7 +582,11 @@ def inject_retention_data_to_jsx(retention_data, df=None, latest_snap=None):
     # ALSO regenerate the standalone HTML for GitHub Pages
     regenerate_index_html(content)
 
-    return len(content)
+    return {
+        'size': len(content),
+        'warnings': warnings_list,
+        'stats': update_stats,
+    }
 
 
 def regenerate_index_html(jsx_code):
@@ -616,7 +653,10 @@ def process_new_bob(filepath, snapshot_date):
     print('Injecting into dashboard JSX...')
     snapshots_sorted = sorted(combined['snapshot_date'].unique())
     latest_snap = snapshots_sorted[-1]
-    jsx_size = inject_retention_data_to_jsx(retention_data, df=combined, latest_snap=latest_snap)
+    inject_result = inject_retention_data_to_jsx(retention_data, df=combined, latest_snap=latest_snap)
+    jsx_size = inject_result['size']
+    jsx_warnings = inject_result['warnings']
+    jsx_stats = inject_result['stats']
     print(f'  - JSX now: {jsx_size:,} chars')
 
     # Build summary
@@ -688,7 +728,32 @@ def process_new_bob(filepath, snapshot_date):
         f'  Disenrolled: {global_rows[-1]["churned"]:>6,}',
     ])
 
+    # === JSX update status (added in script v2 - alerts if dashboard display didn't fully sync) ===
+    summary_lines.extend([
+        '',
+        '=== DASHBOARD UPDATE STATUS ===',
+        f'  RETENTION_DATA:        {"OK" if jsx_stats["retention_data_updated"] else "FAILED"}',
+        f'  BOB const (KPI):       {"OK" if jsx_stats["bob_const_updated"] else "NOT UPDATED"}',
+        f'  AGENCY_DATA:           {jsx_stats["agencies_updated"]}/{jsx_stats["agencies_total"]} agencies',
+        f'  Hardcoded display:     {jsx_stats["hardcoded_texts_updated"]}/{jsx_stats["expected_hardcoded_texts"]} strings',
+    ])
+
+    if jsx_warnings:
+        summary_lines.extend([
+            '',
+            '=== ⚠️  WARNINGS (action may be required) ===',
+        ])
+        for w in jsx_warnings:
+            summary_lines.append(f'  - {w}')
+        summary_lines.append('')
+        summary_lines.append('NOTE: Dashboard data was updated but some display elements may show old values.')
+        summary_lines.append('Check the dashboard and contact administrator if header date or KPI total looks stale.')
+
     summary = '\n'.join(summary_lines)
+
+    # Determine overall success: data updated but with warnings is still "OK"
+    # Only a hard exception in process_new_bob would cause a FAILED email
+    has_warnings = len(jsx_warnings) > 0
 
     return {
         'summary': summary,
@@ -696,4 +761,7 @@ def process_new_bob(filepath, snapshot_date):
         'total_policies': total_policies,
         'total_members': total_members,
         'total_snapshots': combined['snapshot_date'].nunique(),
+        'has_warnings': has_warnings,
+        'jsx_warnings': jsx_warnings,
+        'jsx_stats': jsx_stats,
     }

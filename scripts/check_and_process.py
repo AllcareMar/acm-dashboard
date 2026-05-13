@@ -200,7 +200,7 @@ def main():
         )
         sys.exit(1)
 
-    # Commit and push to trigger GitHub Pages deploy
+    # Commit and push to trigger Netlify deploy
     try:
         print("Committing and pushing to GitHub...")
         commit_msg = f"Auto-update: {newest['file']['name']} ({newest['date'].strftime('%Y-%m-%d')})"
@@ -246,24 +246,30 @@ def main():
     except Exception as e:
         print(f"WARNING: state.json push failed: {e}")
 
-    # Send success email
-    dashboard_url = os.environ.get('DASHBOARD_URL', 'https://TU_USUARIO.github.io/acm-dashboard/')
+    # Send success email (with warning subject if JSX display sync had issues)
     body = (
         f"Dashboard updated successfully.\n\n"
         f"File processed: {newest['file']['name']}\n"
         f"Snapshot date: {newest['date'].strftime('%Y-%m-%d')}\n\n"
         f"--- Summary ---\n{result['summary']}\n\n"
-        f"Dashboard URL: {dashboard_url}\n"
-        f"(GitHub Pages deploy takes 2-3 minutes to go live)\n"
+        f"Dashboard URL: {os.environ.get('DASHBOARD_URL', 'https://acm-dashboard.netlify.app')}\n"
+        f"(Netlify deploy takes 2-3 minutes to go live)\n"
     )
     if alert_multiple:
         body = (
             f"NOTICE: {num_files} files were found in /New. Processed the newest, archived the rest.\n\n" + body
         )
 
+    # If JSX warnings present, mark subject differently so it stands out in the inbox
+    has_jsx_warnings = result.get('has_warnings', False)
+    if has_jsx_warnings:
+        subject = f"ACM BOB Refresh - Success WITH WARNINGS - {newest['date'].strftime('%Y-%m-%d')}"
+    else:
+        subject = f"ACM BOB Refresh - Success - {newest['date'].strftime('%Y-%m-%d')}"
+
     send_notification(
         success=True,
-        subject=f"ACM BOB Refresh - Success - {newest['date'].strftime('%Y-%m-%d')}",
+        subject=subject,
         body=body
     )
     print("Done.")

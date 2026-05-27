@@ -270,12 +270,14 @@ def compute_bob_and_agency_updates(df, latest_snap):
           },
           ...
         },
-        'total_policies': int  # sum of all MA policies in the latest snapshot
+        'total_policies': int  # sum of all policies (MA+MS+PDP) in the latest snapshot
       }
     """
     latest = df[df['snapshot_date'] == latest_snap].drop_duplicates(subset=['policy_id']).copy()
-    # Filter to MA only to match existing AGENCY_DATA convention
-    latest = latest[latest['product'] == 'MA'].copy()
+    # Count ALL products (MA + MS + PDP) so KPI total matches RETENTION_DATA global total.
+    # Previously this was filtered to MA only, which caused KPI to show ~110 fewer policies
+    # than the Retention tab. To keep the dashboard consistent, no product filter is applied.
+    # latest = latest[latest['product'] == 'MA'].copy()  # OLD - removed 2026-05-26
 
     # Ensure memberState is filled - try inferring from planName if missing
     def infer_state(row):

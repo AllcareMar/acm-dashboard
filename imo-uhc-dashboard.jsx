@@ -686,7 +686,7 @@ function CmsBadge({live}){
 function BobBadge(){
   return(
     <div style={{display:"inline-flex",alignItems:"center",gap:5,background:"#1a0f2e",border:"1px solid #8b5cf655",borderRadius:6,padding:"4px 10px",fontSize:10,color:"#c4b5fd"}}>
-      📊 <strong style={{color:"#a78bfa"}}>BOB REAL</strong>  ·  21,559 policies  ·  776 counties  ·  4,275 zips  ·  05-26-2026
+      📊 <strong style={{color:"#a78bfa"}}>BOB REAL</strong>  ·  21,673 policies  ·  776 counties  ·  4,275 zips  ·  05-26-2026
     </div>
   );
 }
@@ -739,7 +739,7 @@ function AgencyFilter({ agencies, selected, onChange }) {
             style={{padding:"8px 12px",cursor:"pointer",color:!selected?UHC_GOLD:"#94a3b8",fontSize:13,fontWeight:!selected?700:400,borderBottom:"1px solid #1e293b",marginBottom:4,display:"flex",alignItems:"center",gap:8}}
           >
             <span>🌐</span> All Agencies
-            <span style={{marginLeft:"auto",color:"#334155",fontSize:11}}>21,559 policies</span>
+            <span style={{marginLeft:"auto",color:"#334155",fontSize:11}}>21,673 policies</span>
           </div>
           {agencies.map(a => (
             <div
@@ -1223,7 +1223,16 @@ export default function Dashboard(){
   const activeAgents   = AD ? AD.agents            : AGENTS_TOTAL;
 
   const kpis=useMemo(()=>{
-    const tm = active.reduce((a,s)=>a+(activeBOB[s]?activeBOB[s].m:0),0);
+    // tm: sum across active states from BOB const (MA only by state).
+    // BUT: when no filter is applied (all states, no agency), prefer the
+    // RETENTION_DATA latest snapshot total which includes ALL products
+    // (MA + MS + PDP). This keeps the KPI consistent with the Retention tab.
+    const tmFromStates = active.reduce((a,s)=>a+(activeBOB[s]?activeBOB[s].m:0),0);
+    let tm = tmFromStates;
+    if (sel.length===0 && !selAgency && RETENTION_DATA && RETENTION_DATA.global && RETENTION_DATA.global.length>0){
+      const lastGlobal = RETENTION_DATA.global[RETENTION_DATA.global.length-1];
+      if (lastGlobal && lastGlobal.total) { tm = lastGlobal.total; }
+    }
     const tl = active.reduce((sum,s)=>sum+(activeAPS[s]||0),0);
     const agSrc = activeAgents || AGENTS_TOTAL;
     const ta = (sel.length===0 && !selAgency)
@@ -2381,7 +2390,7 @@ export default function Dashboard(){
         {/* FOOTER */}
         <div style={{marginTop:22,padding:"12px 0",borderTop:"1px solid #0f172a",display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:6}}>
           <div style={{display:"flex",flexDirection:"column",gap:3}}>
-            <span style={{color:"#94a3b8",fontSize:10}}>📊 BOB: ACM_BOB_05-26-26.xlsx  ·  21,559 active policies  ·  776 counties  ·  134 agents  ·  22 states</span>
+            <span style={{color:"#94a3b8",fontSize:10}}>📊 BOB: ACM_BOB_05-26-26.xlsx  ·  21,673 active policies  ·  776 counties  ·  134 agents  ·  22 states</span>
             <span style={{color:"#94a3b8",fontSize:10}}>🟢 MA-Eligible: CMS Medicare Monthly Enrollment API  ·  data.cms.gov  ·  YEAR=2025 (fallback 2024)  ·  A_B_TOT_BENES  ·  ffsGap=A_B_TOT_BENES−MA_AND_OTH_BENES (REAL data)</span>
             <span style={{color:"#94a3b8",fontSize:10}}>⚠ Confidential & Proprietary - UnitedHealth Group. Do not distribute without permission.</span>
           </div>
